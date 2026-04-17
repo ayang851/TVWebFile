@@ -91,7 +91,7 @@
   <div class="phase" id="phaseRedirect">
     <div class="icon">&#128250;</div>
     <div class="title" id="redirectTitle">正在跳转到电视...</div>
-    <div class="sub">如果长时间无响应，请返回此页面</div>
+    <div class="sub" id="redirectSub">如果 5 秒后未跳转，请返回重试</div>
     <div class="addr" id="redirectAddr"></div>
   </div>
 
@@ -172,35 +172,29 @@
 
   // ========== 探测逻辑 (仅 HTTP 下可用) ==========
 
-  // 使用 Image 对象进行快速探测（比 fetch 更快超时）
-  function probeTVFast(timeout) {
+  // 使用 fetch 探测，精确检查 HTTP 状态码
+  function probeTVFetch(timeout) {
     return new Promise(function(resolve) {
-      var img = new Image();
-      var resolved = false;
-      var timer = setTimeout(function() {
-        if (!resolved) {
-          resolved = true;
-          img.src = '';
+      var ctrl = new AbortController();
+      var timer = setTimeout(function() { ctrl.abort(); }, timeout);
+
+      fetch(tvUrl + '/index.html?_probe=' + Date.now(), {
+        method: 'HEAD',
+        mode: 'no-cors',
+        cache: 'no-store',
+        signal: ctrl.signal
+      }).then(function(response) {
+        clearTimeout(timer);
+        // 状态码 200-299 认为是成功
+        if (response.ok) {
+          resolve(true);
+        } else {
           resolve(false);
         }
-      }, timeout);
-
-      img.onload = function() {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve(true);
-        }
-      };
-      img.onerror = function() {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve(true);
-        }
-      };
-
-      img.src = tvUrl + '/favicon.ico?_probe=' + Date.now();
+      }).catch(function() {
+        clearTimeout(timer);
+        resolve(false);
+      });
     });
   }
 
@@ -214,10 +208,24 @@
     var probeTimeout = 1500;
 
     function tryOnce() {
-      probeTVFast(probeTimeout).then(function(ok) {
+      probeTVFetch(probeTimeout).then(function(ok) {
         if (ok) {
           showPhase('phaseRedirect');
-          setTimeout(function() { location.href = tvUrl; }, 300);
+          // 设置跳转超时，如果 5 秒内未成功跳转，显示失败页面
+          var redirectTimer = setTimeout(function() {
+            showPhase('phaseFail');
+            document.getElementById('redirectSub').textContent = '跳转超时，请检查电视是否在线';
+          }, 5000);
+          setTimeout(function() {
+            location.href = tvUrl;
+            // 如果 8 秒后还在当前页面，说明跳转失败
+            setTimeout(function() {
+              if (!document.hidden) {
+                clearTimeout(redirectTimer);
+                showPhase('phaseFail');
+              }
+            }, 3000);
+          }, 300);
         } else {
           attempts++;
           if (attempts < maxAttempts) {
