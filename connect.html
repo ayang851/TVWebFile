@@ -188,7 +188,7 @@
       }, timeout);
 
       fetch(tvUrl + '/index.html?_probe=' + Date.now(), {
-        method: 'HEAD',
+        method: 'GET',
         cache: 'no-store',
         signal: ctrl.signal
       }).then(function(response) {
@@ -202,7 +202,12 @@
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
-          resolve(false);
+          // 即使是 CORS 错误，也说明服务器有响应，判定为在线
+          if (err.name === 'TypeError' || err.name === 'AbortError') {
+            resolve(true);
+          } else {
+            resolve(false);
+          }
         }
       });
     });
