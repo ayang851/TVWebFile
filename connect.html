@@ -63,7 +63,7 @@
   <!-- Phase 1: 连接中 -->
   <div class="phase active" id="phaseLoading">
     <div class="spinner"></div>
-    <div class="title" id="loadingTitle">正在连接电视...</div>
+    <div class="title" id="loadingTitle">正在检测电视...</div>
     <div class="addr" id="loadingAddr"></div>
   </div>
 
@@ -159,7 +159,7 @@
   }
 
   // 填充地址信息
-  document.getElementById('loadingTitle').textContent = '正在连接「' + tvName + '」...';
+  document.getElementById('loadingTitle').textContent = '正在检测「' + tvName + '」...';
   document.getElementById('loadingAddr').textContent = tvAddr;
   document.getElementById('failDeviceName').textContent = tvName + '（' + tvAddr + '）';
   document.getElementById('redirectTitle').textContent = '正在跳转到「' + tvName + '」...';
@@ -250,30 +250,9 @@
     tryOnce();
   }
 
-  // HTTPS 模式：无法探测，使用导航+回退检测
-  function connectViaNav() {
-    // 检查是否是"按返回键回来"的情况
-    var navTime = sessionStorage.getItem(NAV_KEY);
-    if (navTime && (Date.now() - parseInt(navTime, 10)) < 60000) {
-      // 60秒内回来了，大概率没连上
-      sessionStorage.removeItem(NAV_KEY);
-      showPhase('phaseFail');
-      return;
-    }
-
-    // 首次访问，显示加载后跳转
-    showPhase('phaseLoading');
-    setTimeout(function() {
-      sessionStorage.setItem(NAV_KEY, String(Date.now()));
-      showPhase('phaseRedirect');
-      setTimeout(function() { location.href = tvUrl; }, 500);
-    }, 800);
-  }
-
-  // bfcache 回退检测 (补充 sessionStorage 方案)
+  // bfcache 回退检测
   window.addEventListener('pageshow', function(e) {
     if (e.persisted) {
-      // 从 bfcache 恢复 = 用户按了返回键
       sessionStorage.removeItem(NAV_KEY);
       showPhase('phaseFail');
     }
@@ -282,13 +261,8 @@
   // ========== 主入口 ==========
 
   function startConnect() {
-    if (!isSecure()) {
-      // HTTP 环境：完整探测
-      connectViaProbe();
-    } else {
-      // HTTPS 环境：导航跳转模式
-      connectViaNav();
-    }
+    // 统一先检测，再决定是否跳转
+    connectViaProbe();
   }
 
   // 直接跳转（不探测）
