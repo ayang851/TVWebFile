@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>连接电视</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Helvetica Neue", sans-serif;
+    background: #f0f2f5; min-height: 100vh;
+    display: flex; justify-content: center; align-items: center;
+    padding: 20px;
+  }
+  .card {
+    background: #fff; border-radius: 16px; padding: 40px 28px;
+    text-align: center; max-width: 380px; width: 100%;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  }
+  .icon { font-size: 56px; margin-bottom: 16px; }
+  .title { font-size: 18px; color: #333; font-weight: 600; margin-bottom: 6px; }
+  .sub { font-size: 13px; color: #999; line-height: 1.6; }
+  .addr { font-size: 13px; color: #bbb; margin-top: 4px; font-family: monospace; }
+
+  /* spinner */
+  .spinner {
+    width: 44px; height: 44px; margin: 0 auto 20px;
+    border: 3px solid #e8e8e8; border-top-color: #07c160;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* buttons */
+  .btn {
+    display: block; width: 100%; padding: 13px; border: none;
+    border-radius: 10px; font-size: 16px; cursor: pointer;
+    margin-top: 16px; text-decoration: none; text-align: center;
+  }
+  .btn-primary { background: #07c160; color: #fff; }
+  .btn-primary:active { background: #06ad56; }
+  .btn-outline { background: none; color: #07c160; border: 1px solid #07c160; }
+  .btn-outline:active { background: #f0faf5; }
+
+  /* tips */
+  .tips {
+    margin-top: 24px; padding-top: 20px; border-top: 1px solid #f0f0f0;
+    text-align: left;
+  }
+  .tips-title { font-size: 13px; color: #999; margin-bottom: 8px; }
+  .tips li { font-size: 13px; color: #666; line-height: 2; }
+
+  .wechat-tip {
+    margin-top: 16px; padding: 12px; background: #fff9ed;
+    border-radius: 8px; font-size: 13px; color: #b27c2a; line-height: 1.6;
+  }
+
+  .phase { display: none; }
+  .phase.active { display: block; }
+</style>
+</head>
+<body>
+<div class="card">
+  <!-- Phase 1: 连接中 -->
+  <div class="phase active" id="phaseLoading">
+    <div class="spinner"></div>
+    <div class="title" id="loadingTitle">正在连接电视...</div>
+    <div class="addr" id="loadingAddr"></div>
+  </div>
+
+  <!-- Phase 2: 连接失败 -->
+  <div class="phase" id="phaseFail">
+    <div class="icon">&#128246;</div>
+    <div class="title">无法连接到电视</div>
+    <div class="sub" id="failDeviceName"></div>
+    <button class="btn btn-primary" onclick="startConnect()">重新检测</button>
+    <button class="btn btn-outline" id="btnDirect" onclick="directGo()">仍然尝试打开</button>
+    <div class="tips">
+      <div class="tips-title">请检查：</div>
+      <ul>
+        <li>手机和电视是否连接同一 WiFi</li>
+        <li>电视端应用是否已开启</li>
+        <li>电视 IP 地址是否有变化</li>
+      </ul>
+    </div>
+    <div class="wechat-tip" id="wechatTip" style="display:none">
+      微信内访问受限，建议点击右上角 <b>···</b> 选择<b>「在浏览器中打开」</b>以获得最佳体验。
+    </div>
+  </div>
+
+  <!-- Phase 3: 即将跳转 -->
+  <div class="phase" id="phaseRedirect">
+    <div class="icon">&#128250;</div>
+    <div class="title" id="redirectTitle">正在跳转到电视...</div>
+    <div class="sub">如果长时间无响应，请返回此页面</div>
+    <div class="addr" id="redirectAddr"></div>
+  </div>
+
+  <!-- Phase 4: 参数错误 -->
+  <div class="phase" id="phaseError">
+    <div class="icon">&#128683;</div>
+    <div class="title">连接参数缺失</div>
+    <div class="sub">请通过电视端生成的二维码扫码进入</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // ========== 工具函数 ==========
+
+  // 解析 hash 参数: #ip=x.x.x.x&port=8080&name=客厅电视
+  function parseHash() {
+    var params = {};
+    var hash = location.hash.slice(1);
+    if (!hash) return params;
+    hash.split('&').forEach(function(pair) {
+      var idx = pair.indexOf('=');
+      if (idx > 0) {
+        params[decodeURIComponent(pair.slice(0, idx))] =
+          decodeURIComponent(pair.slice(idx + 1));
+      }
+    });
+    return params;
+  }
+
+  // 检测微信内置浏览器
+  function isWeChat() {
+    return /MicroMessenger/i.test(navigator.userAgent);
+  }
+
+  // 当前页面是否 HTTPS
+  function isSecure() {
+    return location.protocol === 'https:';
+  }
+
+  // 显示指定阶段
+  function showPhase(id) {
+    var phases = document.querySelectorAll('.phase');
+    for (var i = 0; i < phases.length; i++) {
+      phases[i].classList.remove('active');
+    }
+    document.getElementById(id).classList.add('active');
+  }
+
+  // ========== 核心变量 ==========
+
+  var config = parseHash();
+  var tvIp = config.ip;
+  var tvPort = config.port || '8080';
+  var tvName = config.name || '电视';
+  var tvAddr = tvIp + ':' + tvPort;
+  var tvUrl = 'http://' + tvAddr;
+  var NAV_KEY = 'tv_nav_' + tvAddr;
+
+  // ========== 参数校验 ==========
+
+  if (!tvIp) {
+    showPhase('phaseError');
+    return;
+  }
+
+  // 填充地址信息
+  document.getElementById('loadingTitle').textContent = '正在连接「' + tvName + '」...';
+  document.getElementById('loadingAddr').textContent = tvAddr;
+  document.getElementById('failDeviceName').textContent = tvName + '（' + tvAddr + '）';
+  document.getElementById('redirectTitle').textContent = '正在跳转到「' + tvName + '」...';
+  document.getElementById('redirectAddr').textContent = tvAddr;
+
+  // 微信环境提示
+  if (isWeChat()) {
+    document.getElementById('wechatTip').style.display = 'block';
+  }
+
+  // ========== 探测逻辑 (仅 HTTP 下可用) ==========
+
+  function probeTV(timeout) {
+    return new Promise(function(resolve) {
+      var ctrl = new AbortController();
+      var timer = setTimeout(function() { ctrl.abort(); }, timeout);
+      fetch(tvUrl + '/?_probe=' + Date.now(), {
+        mode: 'no-cors',
+        cache: 'no-store',
+        signal: ctrl.signal
+      }).then(function() {
+        clearTimeout(timer);
+        resolve(true);
+      }).catch(function() {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    });
+  }
+
+  // HTTP 模式：能直接探测局域网
+  function connectViaProbe() {
+    showPhase('phaseLoading');
+
+    var attempts = 0;
+    var maxAttempts = 2;
+
+    function tryOnce() {
+      probeTV(3000).then(function(ok) {
+        if (ok) {
+          // 可达，跳转
+          showPhase('phaseRedirect');
+          setTimeout(function() { location.href = tvUrl; }, 300);
+        } else {
+          attempts++;
+          if (attempts < maxAttempts) {
+            tryOnce();
+          } else {
+            showPhase('phaseFail');
+          }
+        }
+      });
+    }
+
+    tryOnce();
+  }
+
+  // HTTPS 模式：无法探测，使用导航+回退检测
+  function connectViaNav() {
+    // 检查是否是"按返回键回来"的情况
+    var navTime = sessionStorage.getItem(NAV_KEY);
+    if (navTime && (Date.now() - parseInt(navTime, 10)) < 60000) {
+      // 60秒内回来了，大概率没连上
+      sessionStorage.removeItem(NAV_KEY);
+      showPhase('phaseFail');
+      return;
+    }
+
+    // 首次访问，显示加载后跳转
+    showPhase('phaseLoading');
+    setTimeout(function() {
+      sessionStorage.setItem(NAV_KEY, String(Date.now()));
+      showPhase('phaseRedirect');
+      setTimeout(function() { location.href = tvUrl; }, 500);
+    }, 800);
+  }
+
+  // bfcache 回退检测 (补充 sessionStorage 方案)
+  window.addEventListener('pageshow', function(e) {
+    if (e.persisted) {
+      // 从 bfcache 恢复 = 用户按了返回键
+      sessionStorage.removeItem(NAV_KEY);
+      showPhase('phaseFail');
+    }
+  });
+
+  // ========== 主入口 ==========
+
+  function startConnect() {
+    if (!isSecure()) {
+      // HTTP 环境：完整探测
+      connectViaProbe();
+    } else {
+      // HTTPS 环境：导航跳转模式
+      connectViaNav();
+    }
+  }
+
+  // 直接跳转（不探测）
+  function directGo() {
+    sessionStorage.setItem(NAV_KEY, String(Date.now()));
+    location.href = tvUrl;
+  }
+
+  // 暴露到全局给按钮调用
+  window.startConnect = startConnect;
+  window.directGo = directGo;
+
+  // 启动
+  startConnect();
+})();
+</script>
+</body>
+</html>
