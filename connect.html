@@ -172,21 +172,35 @@
 
   // ========== 探测逻辑 (仅 HTTP 下可用) ==========
 
-  function probeTV(timeout) {
+  // 使用 Image 对象进行快速探测（比 fetch 更快超时）
+  function probeTVFast(timeout) {
     return new Promise(function(resolve) {
-      var ctrl = new AbortController();
-      var timer = setTimeout(function() { ctrl.abort(); }, timeout);
-      fetch(tvUrl + '/?_probe=' + Date.now(), {
-        mode: 'no-cors',
-        cache: 'no-store',
-        signal: ctrl.signal
-      }).then(function() {
-        clearTimeout(timer);
-        resolve(true);
-      }).catch(function() {
-        clearTimeout(timer);
-        resolve(false);
-      });
+      var img = new Image();
+      var resolved = false;
+      var timer = setTimeout(function() {
+        if (!resolved) {
+          resolved = true;
+          img.src = '';
+          resolve(false);
+        }
+      }, timeout);
+
+      img.onload = function() {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(true);
+        }
+      };
+      img.onerror = function() {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(true);
+        }
+      };
+
+      img.src = tvUrl + '/favicon.ico?_probe=' + Date.now();
     });
   }
 
@@ -196,11 +210,12 @@
 
     var attempts = 0;
     var maxAttempts = 2;
+    // 5G 网络下使用更短的超时，快速失败
+    var probeTimeout = 1500;
 
     function tryOnce() {
-      probeTV(3000).then(function(ok) {
+      probeTVFast(probeTimeout).then(function(ok) {
         if (ok) {
-          // 可达，跳转
           showPhase('phaseRedirect');
           setTimeout(function() { location.href = tvUrl; }, 300);
         } else {
