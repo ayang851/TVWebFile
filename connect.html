@@ -176,24 +176,34 @@
   function probeTVFetch(timeout) {
     return new Promise(function(resolve) {
       var ctrl = new AbortController();
-      var timer = setTimeout(function() { ctrl.abort(); }, timeout);
+      var resolved = false;
+
+      // 超时处理
+      var timer = setTimeout(function() {
+        if (!resolved) {
+          resolved = true;
+          ctrl.abort();
+          resolve(false);
+        }
+      }, timeout);
 
       fetch(tvUrl + '/index.html?_probe=' + Date.now(), {
         method: 'HEAD',
-        mode: 'no-cors',
         cache: 'no-store',
         signal: ctrl.signal
       }).then(function(response) {
-        clearTimeout(timer);
-        // 状态码 200-299 认为是成功
-        if (response.ok) {
-          resolve(true);
-        } else {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          // 状态码 200-299 认为是成功
+          resolve(response.ok);
+        }
+      }).catch(function(err) {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
           resolve(false);
         }
-      }).catch(function() {
-        clearTimeout(timer);
-        resolve(false);
       });
     });
   }
